@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule to Calendar</title>
+<style>
+  :root{color-scheme:light dark;--bg:#0f1115;--card:#171a21;--line:#2a2e38;--text:#e8eaed;--muted:#9aa0aa;--accent:#5b8cff;}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--card:#fff;--line:#e2e5ea;--text:#1a1d23;--muted:#5a6070;--accent:#3b6fe0;}}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;}
+  .wrap{max-width:880px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  p.sub{color:var(--muted);margin:0 0 24px;font-size:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:20px;}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .step-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:600;}
+  input[type=file],input[type=date],input[type=time],input[type=text]{background:transparent;border:1px solid var(--line);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;width:100%;}
+  label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px;}
+  .field{margin-bottom:14px;}
+  button{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  button.secondary{background:transparent;border:1px solid var(--line);color:var(--text);}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:6px;text-align:left;}
+  th{color:var(--muted);font-weight:500;font-size:12px;}
+  td input{border:none;background:transparent;width:100%;padding:4px;font-size:13px;color:var(--text);}
+  td input:focus{outline:1px solid var(--accent);border-radius:4px;}
+  .row-actions{display:flex;gap:8px;margin-top:10px;}
+  .period-times{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;}
+  .period-times .group{border:1px solid var(--line);border-radius:6px;padding:10px;}
+  .period-times .group .label{font-size:12px;color:var(--muted);margin-bottom:6px;}
+  .period-times .group .row{display:flex;gap:6px;align-items:center;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;}
+  .status{font-size:13px;margin-top:10px;}
+  .status.err{color:#e05d5d;}
+  .status.ok{color:#3fb950;}
+  .hidden{display:none;}
+  table td.small-col, table th.small-col{width:56px;}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Schedule → Calendar</h1>
+  <p class="sub">Upload a screenshot of your class timetable and get a calendar file you can import into Google Calendar, Apple Calendar, or Outlook.</p>
+
+  <div class="card">
+    <h2><span class="step-num">1</span> Upload your timetable screenshot</h2>
+    <div class="field">
+      <input type="file" id="imageInput" accept="image/*">
+    </div>
+    <button id="parseBtn">Read my schedule</button>
+    <div id="parseStatus" class="status"></div>
+  </div>
+
+  <div class="card hidden" id="reviewCard">
+    <h2><span class="step-num">2</span> Check the courses (fix anything that's wrong)</h2>
+    <div style="overflow-x:auto">
+      <table id="courseTable">
+        <thead>
+          <tr>
+            <th>Course</th>
+            <th>Type</th>
+            <th class="small-col">Day</th>
+            <th class="small-col">Period start</th>
+            <th class="small-col">Period end</th>
+            <th class="small-col">Week start</th>
+            <th class="small-col">Week end</th>
+            <th>Location</th>
+            <th>Teacher</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="courseBody"></tbody>
+      </table>
+    </div>
+    <div class="row-actions">
+      <button class="secondary" id="addRowBtn">+ Add row</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="settingsCard">
+    <h2><span class="step-num">3</span> Term settings</h2>
+    <div class="field">
+      <label>Date of the Monday of Week 1 of this term</label>
+      <input type="date" id="week1Input">
+    </div>
+    <label>Class times for each period range used above</label>
+    <div class="period-times" id="periodTimes"></div>
+    <div class="hint">Times are treated as Asia/Shanghai. If your term is in a different timezone, ask whoever built this to adjust it.</div>
+  </div>
+
+  <div class="card hidden" id="generateCard">
+    <h2><span class="step-num">4</span> Get your calendar file</h2>
+    <button id="generateBtn">Generate calendar file (.ics)</button>
+    <div id="generateStatus" class="status"></div>
+    <div class="hint">After downloading: in Google Calendar, go to Settings → Import & export → Import, and select the file. On iPhone/Mac, just open the file and it adds itself to Calendar.</div>
+  </div>
+</div>
+
+<script>
+const imageInput = document.getElementById('imageInput');
+const parseBtn = document.getElementById('parseBtn');
+const parseStatus = document.getElementById('parseStatus');
+const reviewCard = document.getElementById('reviewCard');
+const courseBody = document.getElementById('courseBody');
+const addRowBtn = document.getElementById('addRowBtn');
+const settingsCard = document.getElementById('settingsCard');
+const week1Input = document.getElementById('week1Input');
+const periodTimesEl = document.getElementById('periodTimes');
+const generateCard = document.getElementById('generateCard');
+const generateBtn = document.getElementById('generateBtn');
+const generateStatus = document.getElementById('generateStatus');
+
+let courses = [];
+
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+parseBtn.addEventListener('click', async () => {
+  const file = imageInput.files[0];
+  if(!file){ parseStatus.textContent = 'Choose an image first.'; parseStatus.className='status err'; return; }
+  parseBtn.disabled = true;
+  parseStatus.innerHTML = '<span class="spinner"></span>Reading your schedule…';
+  parseStatus.className = 'status';
+  try{
+    const base64 = await fileToBase64(file);
+    const res = await fetch('/api/parse', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ image: base64, mediaType: file.type || 'image/png' })
+    });
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(t || ('Server error ' + res.status));
+    }
+    const data = await res.json();
+    courses = data.courses || [];
+    if(courses.length === 0){
+      throw new Error('No courses were found in that image. Try a clearer screenshot.');
+    }
+    renderTable();
+    renderPeriodTimes();
+    reviewCard.classList.remove('hidden');
+    settingsCard.classList.remove('hidden');
+    generateCard.classList.remove('hidden');
+    parseStatus.textContent = `Found ${courses.length} class session(s). Review below.`;
+    parseStatus.className = 'status ok';
+  }catch(err){
+    parseStatus.textContent = 'Could not read that image: ' + err.message;
+    parseStatus.className = 'status err';
+  }finally{
+    parseBtn.disabled = false;
+  }
+});
+
+function courseRowHtml(c, idx){
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const dayOptions = days.map(d => `<option value="${d}" ${c.day===d?'selected':''}>${d}</option>`).join('');
+  return `<tr data-idx="${idx}">
+    <td><input type="text" data-field="course_name" value="${escapeHtml(c.course_name||'')}"></td>
+    <td><input type="text" data-field="session_type" value="${escapeHtml(c.session_type||'')}"></td>
+    <td><select data-field="day">${dayOptions}</select></td>
+    <td><input type="text" data-field="period_start" value="${c.period_start||''}"></td>
+    <td><input type="text" data-field="period_end" value="${c.period_end||''}"></td>
+    <td><input type="text" data-field="week_start" value="${c.week_start||''}"></td>
+    <td><input type="text" data-field="week_end" value="${c.week_end||''}"></td>
+    <td><input type="text" data-field="location" value="${escapeHtml(c.location||'')}"></td>
+    <td><input type="text" data-field="teacher" value="${escapeHtml(c.teacher||'')}"></td>
+    <td><button class="secondary" data-remove="${idx}" type="button">✕</button></td>
+  </tr>`;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function renderTable(){
+  courseBody.innerHTML = courses.map((c,i)=>courseRowHtml(c,i)).join('');
+  courseBody.querySelectorAll('input,select').forEach(inp=>{
+    inp.addEventListener('change', (e)=>{
+      const tr = e.target.closest('tr');
+      const idx = Number(tr.dataset.idx);
+      const field = e.target.dataset.field;
+      courses[idx][field] = e.target.value;
+      renderPeriodTimes();
+    });
+  });
+  courseBody.querySelectorAll('button[data-remove]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      const idx = Number(e.target.dataset.remove);
+      courses.splice(idx,1);
+      renderTable();
+      renderPeriodTimes();
+    });
+  });
+}
+
+addRowBtn.addEventListener('click', ()=>{
+  courses.push({course_name:'', session_type:'', day:'Mon', period_start:1, period_end:2, week_start:1, week_end:16, location:'', teacher:''});
+  renderTable();
+  renderPeriodTimes();
+});
+
+let periodTimeValues = {};
+
+function renderPeriodTimes(){
+  const keys = new Set();
+  courses.forEach(c=>{
+    if(c.period_start && c.period_end) keys.add(`${c.period_start}-${c.period_end}`);
+  });
+  periodTimesEl.innerHTML = Array.from(keys).sort().map(key=>{
+    const existing = periodTimeValues[key] || {start:'', end:''};
+    return `<div class="group" data-key="${key}">
+      <div class="label">Period ${key}</div>
+      <div class="row">
+        <input type="time" data-key="${key}" data-part="start" value="${existing.start}">
+        <span>–</span>
+        <input type="time" data-key="${key}" data-part="end" value="${existing.end}">
+      </div>
+    </div>`;
+  }).join('');
+  periodTimesEl.querySelectorAll('input[type=time]').forEach(inp=>{
+    inp.addEventListener('change', (e)=>{
+      const key = e.target.dataset.key;
+      const part = e.target.dataset.part;
+      periodTimeValues[key] = periodTimeValues[key] || {start:'',end:''};
+      periodTimeValues[key][part] = e.target.value;
+    });
+  });
+}
+
+const dayOffset = {Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6};
+
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function addDays(date, days){
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function fmtICSDate(date, hh, mm){
+  return `${date.getFullYear()}${pad(date.getMonth()+1)}${pad(date.getDate())}T${pad(hh)}${pad(mm)}00`;
+}
+
+function icsEscape(s){
+  return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
+}
+
+generateBtn.addEventListener('click', ()=>{
+  generateStatus.className = 'status';
+  const week1 = week1Input.value;
+  if(!week1){ generateStatus.textContent = 'Set the Week 1 Monday date first.'; generateStatus.className='status err'; return; }
+  const [y,m,d] = week1.split('-').map(Number);
+  const week1Monday = new Date(y, m-1, d);
+
+  for(const c of courses){
+    const key = `${c.period_start}-${c.period_end}`;
+    const t = periodTimeValues[key];
+    if(!t || !t.start || !t.end){
+      generateStatus.textContent = `Missing class time for Period ${key}. Fill in Step 3.`;
+      generateStatus.className = 'status err';
+      return;
+    }
+  }
+
+  let ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//schedule-to-ics//EN\r\nCALSCALE:GREGORIAN\r\n';
+  ics += 'BEGIN:VTIMEZONE\r\nTZID:Asia/Shanghai\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n';
+
+  const now = new Date();
+  const dtstamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+
+  courses.forEach((c, i)=>{
+    const weekStart = Number(c.week_start);
+    const weekEnd = Number(c.week_end);
+    const count = Math.max(1, weekEnd - weekStart + 1);
+    const offsetDays = (weekStart - 1) * 7 + (dayOffset[c.day] ?? 0);
+    const firstDate = addDays(week1Monday, offsetDays);
+    const key = `${c.period_start}-${c.period_end}`;
+    const t = periodTimeValues[key];
+    const [sh, sm] = t.start.split(':').map(Number);
+    const [eh, em] = t.end.split(':').map(Number);
+
+    ics += 'BEGIN:VEVENT\r\n';
+    ics += `UID:${Date.now()}-${i}@schedule-to-ics\r\n`;
+    ics += `DTSTAMP:${dtstamp}\r\n`;
+    ics += `DTSTART;TZID=Asia/Shanghai:${fmtICSDate(firstDate, sh, sm)}\r\n`;
+    ics += `DTEND;TZID=Asia/Shanghai:${fmtICSDate(firstDate, eh, em)}\r\n`;
+    ics += `RRULE:FREQ=WEEKLY;COUNT=${count}\r\n`;
+    ics += `SUMMARY:${icsEscape(c.course_name)}${c.session_type ? ' ('+icsEscape(c.session_type)+')' : ''}\r\n`;
+    if(c.location) ics += `LOCATION:${icsEscape(c.location)}\r\n`;
+    const desc = [c.teacher ? 'Teacher: '+c.teacher : '', `Weeks ${weekStart}-${weekEnd}`].filter(Boolean).join(' | ');
+    if(desc) ics += `DESCRIPTION:${icsEscape(desc)}\r\n`;
+    ics += 'END:VEVENT\r\n';
+  });
+
+  ics += 'END:VCALENDAR\r\n';
+
+  const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'my-schedule.ics';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  generateStatus.textContent = `Downloaded my-schedule.ics with ${courses.length} class(es). Import it into your calendar app.`;
+  generateStatus.className = 'status ok';
+});
+</script>
+</body>
+</html>

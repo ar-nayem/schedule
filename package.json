@@ -1,0 +1,13 @@
+{
+  "name": "schedule-to-ics",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Upload a class timetable screenshot, get a .ics calendar file. Static frontend + one Vercel serverless function.",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
